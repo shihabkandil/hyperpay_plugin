@@ -204,44 +204,61 @@ public class SwiftPaymentPlugin: NSObject,FlutterPlugin ,SFSafariViewControllerD
             }
             else {
                 do {
-                    let params = try OPPCardPaymentParams(checkoutID: checkoutId, paymentBrand: self.brands, holder: self.holder, number: self.number, expiryMonth: self.month, expiryYear: self.year, cvv: self.cvv)
-                    var isEnabledTokenization:Bool = false;
-                    if(self.setStorePaymentDetailsMode=="true"){
-                        isEnabledTokenization=true;
-                    }
-                    params.isTokenizationEnabled=isEnabledTokenization;
-                    //set tokenization
-                    params.shopperResultURL =  self.shopperResultURL+"://result"
-                    self.transaction  = OPPTransaction(paymentParams: params)
-                    self.provider.submitTransaction(self.transaction!) {
-                        (transaction, error) in
-                        guard let transaction = self.transaction else {
-                            // Handle invalid transaction, check error
-                            self.createalart(titletext: error as! String, msgtext: error as! String)
+                    let params = try OPPCardPaymentParams(
+                        checkoutID: checkoutId,
+                        paymentBrand: self.brands,
+                        holder: self.holder,
+                        number: self.number,
+                        expiryMonth: self.month,
+                        expiryYear: self.year,
+                        cvv: self.cvv
+                    )
+
+                    // Enable tokenization safely
+                    params.isTokenizationEnabled = (self.setStorePaymentDetailsMode.lowercased() == "true")
+                    params.shopperResultURL = "\(self.shopperResultURL)://result"
+
+                    let transaction = OPPTransaction(paymentParams: params)
+                    self.transaction = transaction
+
+                    self.provider.submitTransaction(transaction) { [weak self] (submittedTransaction, error) in
+                        guard let self = self else { return }
+
+                        if let error = error {
+                            self.createalart(titletext: "Transaction Failed", msgtext: error.localizedDescription)
                             return
                         }
-                        if transaction.type == .asynchronous {
-                            self.safariVC = SFSafariViewController(url: self.transaction!.redirectURL!)
-                            self.safariVC?.delegate = self;
-                            //    self.present(self.safariVC!, animated: true, completion: nil)
-                            UIApplication.shared.windows.first?.rootViewController?.present(self.safariVC!, animated: true, completion: nil)
+
+                        guard let submittedTransaction = submittedTransaction else {
+                            self.createalart(titletext: "Transaction Error", msgtext: "Transaction is nil")
+                            return
                         }
-                        else if transaction.type == .synchronous {
-                            // Send request to your server to obtain transaction status
+
+                        self.transaction = submittedTransaction
+
+                        switch submittedTransaction.type {
+                        case .asynchronous:
+                            if let redirectURL = submittedTransaction.redirectURL {
+                                let safariVC = SFSafariViewController(url: redirectURL)
+                                safariVC.delegate = self
+                                self.safariVC = safariVC
+                                UIApplication.shared.windows.first?.rootViewController?.present(safariVC, animated: true)
+                            } else {
+                                self.createalart(titletext: "Error", msgtext: "Missing redirect URL for asynchronous transaction.")
+                            }
+
+                        case .synchronous:
                             result1("success")
-                        }
-                        else {
-                            // Handle the error
-                            self.createalart(titletext: error as! String, msgtext: "Plesae try again")
+
+                        default:
+                            self.createalart(titletext: "Transaction Failed", msgtext: "Unexpected transaction type.")
                         }
                     }
-                    // Set shopper result URL
-                    //    params.shopperResultURL = "com.companyname.appname.payments://result"
+
+                } catch let error as NSError {
+                    self.createalart(titletext: "Invalid Card Details", msgtext: error.localizedDescription)
                 }
-                catch let error as NSError {
-                    // See error.code (OPPErrorCode) and error.localizedDescription to identify the reason of failure
-                    self.createalart(titletext: error.localizedDescription, msgtext: "")
-                }
+
             }
     }
 
